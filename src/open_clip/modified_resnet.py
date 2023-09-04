@@ -98,6 +98,7 @@ class ModifiedResNet(nn.Module):
     - There are now 3 "stem" convolutions as opposed to 1, with an average pool instead of a max pool.
     - Performs anti-aliasing strided convolutions, where an avgpool is prepended to convolutions with stride > 1
     - The final pooling layer is a QKV attention instead of an average pool
+    前面两点同R50_vd, 第3点将2048输出维度改成了1024
     """
 
     def __init__(self, layers, output_dim, heads, image_size=224, width=64):

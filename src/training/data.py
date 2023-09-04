@@ -42,6 +42,7 @@ class CsvDataset(Dataset):
         return len(self.captions)
 
     def __getitem__(self, idx):
+        #图像变换直接在这里用
         images = self.transforms(Image.open(str(self.images[idx])))
         texts = self.tokenize([str(self.captions[idx])])[0]
         return images, texts
@@ -67,6 +68,7 @@ class DataInfo:
     def set_epoch(self, epoch):
         if self.shared_epoch is not None:
             self.shared_epoch.set_value(epoch)
+        #通过这种方式设置epoch数更加安全？
         if self.sampler is not None and isinstance(self.sampler, DistributedSampler):
             self.sampler.set_epoch(epoch)
 
@@ -95,6 +97,7 @@ def expand_urls(urls, weights=None):
 
 def get_dataset_size(shards):
     shards_list, _ = expand_urls(shards)
+
     dir_path = os.path.dirname(shards_list[0])
     sizes_filename = os.path.join(dir_path, 'sizes.json')
     len_filename = os.path.join(dir_path, '__len__')
@@ -328,7 +331,7 @@ class ResampledShards2(IterableDataset):
 def get_wds_dataset(args, preprocess_img, is_train, epoch=0, floor=False, tokenizer=None):
     input_shards = args.train_data if is_train else args.val_data
     assert input_shards is not None
-    resampled = getattr(args, 'dataset_resampled', False) and is_train
+    resampled = getattr(args, 'dataset_resampled', False) and is_train #False
 
     num_shards = None
     if is_train:
@@ -447,7 +450,7 @@ def get_csv_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
     assert input_filename
     dataset = CsvDataset(
         input_filename,
-        preprocess_fn,
+        preprocess_fn, #图像处理函数放在这里
         img_key=args.csv_img_key,
         caption_key=args.csv_caption_key,
         sep=args.csv_separator,
@@ -466,8 +469,9 @@ def get_csv_dataset(args, preprocess_fn, is_train, epoch=0, tokenizer=None):
         sampler=sampler,
         drop_last=is_train,
     )
-    dataloader.num_samples = num_samples
-    dataloader.num_batches = len(dataloader)
+
+    dataloader.num_samples = num_samples #3360
+    dataloader.num_batches = len(dataloader) #3360/128=26
 
     return DataInfo(dataloader, sampler)
 

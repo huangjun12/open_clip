@@ -27,8 +27,13 @@ try:
 except ImportError:
     hvd = None
 
+# import时找到上级目录
+__dir__ = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(__dir__)
+sys.path.insert(0, os.path.abspath(os.path.join( __dir__, "..")))
+
 from open_clip import create_model_and_transforms, trace_model, get_tokenizer, create_loss
-from training.data import get_data
+from data import get_data
 from training.distributed import is_master, init_distributed_device, broadcast_object
 from training.logger import setup_logging
 from training.params import parse_args
@@ -70,6 +75,7 @@ def get_latest_checkpoint(path: str, remote : bool):
 def main(args):
     args = parse_args(args)
 
+    # 开torch的tf32模式进行加速
     if torch.cuda.is_available():
         # This enables tf32 on Ampere GPUs which is only 8% slower than
         # float16 and almost as accurate as float32
@@ -161,12 +167,12 @@ def main(args):
             resume_from = broadcast_object(args, resume_from)
         args.resume = resume_from
 
-    if args.copy_codebase:
+    if args.copy_codebase: # False
         copy_codebase(args)
 
     # start the sync proces if remote-sync is not None
     remote_sync_process = None
-    if is_master(args) and args.remote_sync is not None:
+    if is_master(args) and args.remote_sync is not None: # None
         # first make sure it works
         result = remote_sync(
             os.path.join(args.logs, args.name), 
@@ -187,16 +193,17 @@ def main(args):
         )
         remote_sync_process.start()
 
-    if args.precision == 'fp16':
+
+    if args.precision == 'fp16': #amp
         logging.warning(
             'It is recommended to use AMP mixed-precision instead of FP16. '
             'FP16 support needs further verification and tuning, especially for train.')
 
-    if args.horovod:
+    if args.horovod: #False
         logging.info(
             f'Running in horovod mode with multiple processes / nodes. Device: {args.device}.'
             f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
-    elif args.distributed:
+    elif args.distributed: # False
         logging.info(
             f'Running in distributed mode with multiple processes. Device: {args.device}.'
             f'Process (global: {args.rank}, local {args.local_rank}), total {args.world_size}.')
@@ -205,33 +212,36 @@ def main(args):
 
     dist_model = None
     args.distill = args.distill_model is not None and args.distill_pretrained is not None
-    if args.distill:
+
+    if args.distill: # False
         #FIXME: support distillation with grad accum.
         assert args.accum_freq == 1
         #FIXME: support distillation with coca.
         assert 'coca' not in args.model.lower()
 
-    if isinstance(args.force_image_size, (tuple, list)) and len(args.force_image_size) == 1:
+    if isinstance(args.force_image_size, (tuple, list)) and len(args.force_image_size) == 1: #False
         # arg is nargs, single (square) image size list -> int
         args.force_image_size = args.force_image_size[0]
+
     random_seed(args.seed, 0)
+
     model, preprocess_train, preprocess_val = create_model_and_transforms(
-        args.model,
-        args.pretrained,
-        precision=args.precision,
-        device=device,
-        jit=args.torchscript,
-        force_quick_gelu=args.force_quick_gelu,
-        force_custom_text=args.force_custom_text,
-        force_patch_dropout=args.force_patch_dropout,
-        force_image_size=args.force_image_size,
-        pretrained_image=args.pretrained_image,
-        image_mean=args.image_mean,
-        image_std=args.image_std,
-        aug_cfg=args.aug_cfg,
+        args.model, # RN50
+        args.pretrained, #None
+        precision=args.precision, #amp
+        device=device, #cuda:0
+        jit=args.torchscript, #False
+        force_quick_gelu=args.force_quick_gelu, #False
+        force_custom_text=args.force_custom_text, #False
+        force_patch_dropout=args.force_patch_dropout, #None
+        force_image_size=args.force_image_size, #None
+        pretrained_image=args.pretrained_image, #None
+        image_mean=args.image_mean, #None
+        image_std=args.image_std, #None
+        aug_cfg=args.aug_cfg, #{}
         output_dict=True,
     )
-    if args.distill:
+    if args.distill: #False
         # FIXME: currenlty assumes the model your distilling from has the same tokenizer & transforms.
         dist_model, _, _ = create_model_and_transforms(
             args.distill_model, 
@@ -240,7 +250,8 @@ def main(args):
             precision=args.precision,
             output_dict=True,
         )
-    if args.use_bnb_linear is not None:
+
+    if args.use_bnb_linear is not None: #None
         print('=> using a layer from bitsandbytes.\n'
               '   this is an experimental feature which requires two extra pip installs\n'
               '   pip install bitsandbytes triton'
@@ -254,20 +265,20 @@ def main(args):
 
     random_seed(args.seed, args.rank)
 
-    if args.trace:
+    if args.trace: #False
         model = trace_model(model, batch_size=args.batch_size, device=device)
 
-    if args.lock_image:
+    if args.lock_image: #False
         # lock image tower as per LiT - https://arxiv.org/abs/2111.07991
         model.lock_image_tower(
             unlocked_groups=args.lock_image_unlocked_groups,
             freeze_bn_stats=args.lock_image_freeze_bn_stats)
-    if args.lock_text:
+    if args.lock_text: #False
         model.lock_text_tower(
             unlocked_layers=args.lock_text_unlocked_layers,
             freeze_layer_norm=args.lock_text_freeze_layer_norm)
 
-    if args.grad_checkpointing:
+    if args.grad_checkpointing: # False
         model.set_grad_checkpointing()
 
     if is_master(args):
@@ -281,7 +292,7 @@ def main(args):
                 logging.info(f"  {name}: {val}")
                 f.write(f"{name}: {val}\n")
 
-    if args.distributed and not args.horovod:
+    if args.distributed and not args.horovod: #False
         if args.use_bn_sync:
             model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
         ddp_args = {}
@@ -350,9 +361,10 @@ def main(args):
 
     # create scheduler if train
     scheduler = None
+
     if 'train' in data and optimizer is not None:
         total_steps = (data["train"].dataloader.num_batches // args.accum_freq) * args.epochs
-        if args.lr_scheduler == "cosine":
+        if args.lr_scheduler == "cosine": #True
             scheduler = cosine_lr(optimizer, args.lr, args.warmup, total_steps)
         elif args.lr_scheduler == "const":
             scheduler = const_lr(optimizer, args.lr, args.warmup, total_steps)
@@ -396,7 +408,7 @@ def main(args):
         wandb.save(params_file)
         logging.debug('Finished loading wandb.')
 
-    if args.torchcompile:
+    if args.torchcompile: #False
         logging.info('Compiling model...')
         model = torch.compile(model)
 
@@ -487,4 +499,5 @@ def copy_codebase(args):
 
 
 if __name__ == "__main__":
+    print('===1===')
     main(sys.argv[1:])

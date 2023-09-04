@@ -69,7 +69,7 @@ class ClipLoss(nn.Module):
             self,
             local_loss=False,
             gather_with_grad=False,
-            cache_labels=False,
+            cache_labels=False, #True
             rank=0,
             world_size=1,
             use_horovod=False,

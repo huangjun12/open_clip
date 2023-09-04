@@ -110,7 +110,7 @@ def _build_vision_tower(
             embed_dim=embed_dim,
             image_size=vision_cfg.image_size,
         )
-    elif isinstance(vision_cfg.layers, (tuple, list)):
+    elif isinstance(vision_cfg.layers, (tuple, list)): #True
         vision_heads = vision_cfg.width * 32 // vision_cfg.head_width
         visual = ModifiedResNet(
             layers=vision_cfg.layers,
@@ -210,6 +210,9 @@ class CLIP(nn.Module):
         self.text_projection = text.text_projection
         self.register_buffer('attn_mask', text.attn_mask, persistent=False)
 
+        #logit_scale是一个实数值，用于调整图像特征和文本特征之间点积（即相似度矩阵）的范围。
+        # 代码中是nn.Parameter(torch.ones([]) * np.log(1 / 0.07))，是一个可学习的参数。
+        # 模型可以在训练过程中自动调整这个缩放因子。
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
     def lock_image_tower(self, unlocked_groups=0, freeze_bn_stats=False):
@@ -229,14 +232,22 @@ class CLIP(nn.Module):
         cast_dtype = self.transformer.get_cast_dtype()
 
         x = self.token_embedding(text).to(cast_dtype)  # [batch_size, n_ctx, d_model]
+        # 128,77 --> 128,77,512
 
-        x = x + self.positional_embedding.to(cast_dtype)
+        x = x + self.positional_embedding.to(cast_dtype) #加法, 128,77,512
+
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x, attn_mask=self.attn_mask)
         x = x.permute(1, 0, 2)  # LND -> NLD
+
         x = self.ln_final(x)  # [batch_size, n_ctx, transformer.width]
+
         # take features from the eot embedding (eot_token is the highest number in each sequence)
+        # eot end of text?
+        # 128,77,512 里面选一个 128,512 过一个投影矩阵得到128,1024输出
+        # 怎么选？按单词tokenizer后的最大id？
         x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ self.text_projection
+
         return F.normalize(x, dim=-1) if normalize else x
 
     def forward(
@@ -244,6 +255,7 @@ class CLIP(nn.Module):
             image: Optional[torch.Tensor] = None,
             text: Optional[torch.Tensor] = None,
     ):
+
         image_features = self.encode_image(image, normalize=True) if image is not None else None
         text_features = self.encode_text(text, normalize=True) if text is not None else None
         if self.output_dict:

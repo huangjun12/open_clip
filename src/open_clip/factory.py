@@ -122,7 +122,8 @@ def create_model(
         require_pretrained: bool = False,
 ):
     has_hf_hub_prefix = model_name.startswith(HF_HUB_PREFIX)
-    if has_hf_hub_prefix:
+
+    if has_hf_hub_prefix: # False
         model_id = model_name[len(HF_HUB_PREFIX):]
         checkpoint_path = download_pretrained_from_hf(model_id, cache_dir=cache_dir)
         config_path = download_pretrained_from_hf(model_id, filename='open_clip_config.json', cache_dir=cache_dir)
@@ -140,7 +141,7 @@ def create_model(
     if isinstance(device, str):
         device = torch.device(device)
 
-    if pretrained and pretrained.lower() == 'openai':
+    if pretrained and pretrained.lower() == 'openai': #False
         logging.info(f'Loading pretrained {model_name} from OpenAI.')
         model = load_openai_model(
             model_name,
@@ -149,6 +150,7 @@ def create_model(
             cache_dir=cache_dir,
         )
     else:
+        # None, RN50
         model_cfg = model_cfg or get_model_config(model_name)
         if model_cfg is not None:
             logging.info(f'Loaded {model_name} model config.')
@@ -156,32 +158,32 @@ def create_model(
             logging.error(f'Model config for {model_name} not found; available models {list_models()}.')
             raise RuntimeError(f'Model config for {model_name} not found.')
 
-        if force_quick_gelu:
+        if force_quick_gelu: #False
             # override for use of QuickGELU on non-OpenAI transformer models
             model_cfg["quick_gelu"] = True
 
-        if force_patch_dropout is not None:
+        if force_patch_dropout is not None: #False
             # override the default patch dropout value
             model_cfg["vision_cfg"]["patch_dropout"] = force_patch_dropout
 
-        if force_image_size is not None:
+        if force_image_size is not None: #False
             # override model config's image size
             model_cfg["vision_cfg"]["image_size"] = force_image_size
 
         is_timm_model = 'timm_model_name' in model_cfg.get('vision_cfg', {})
-        if pretrained_image:
-            if is_timm_model:
+        if pretrained_image: #False
+            if is_timm_model: #False
                 # pretrained weight loading for timm models set via vision_cfg
                 model_cfg['vision_cfg']['timm_model_pretrained'] = True
             else:
                 assert False, 'pretrained image towers currently only supported for timm models'
 
         # cast_dtype set for fp16 and bf16 (manual mixed-precision), not set for 'amp' or 'pure' modes
-        cast_dtype = get_cast_dtype(precision)
-        is_hf_model = 'hf_model_name' in model_cfg.get('text_cfg', {})
+        cast_dtype = get_cast_dtype(precision) #None
+        is_hf_model = 'hf_model_name' in model_cfg.get('text_cfg', {}) #False
         custom_text = model_cfg.pop('custom_text', False) or force_custom_text or is_hf_model
 
-        if custom_text:
+        if custom_text: #False
             if is_hf_model:
                 model_cfg['text_cfg']['hf_model_pretrained'] = pretrained_hf
             if "coca" in model_name:
@@ -191,7 +193,7 @@ def create_model(
         else:
             model = CLIP(**model_cfg, cast_dtype=cast_dtype)
 
-        if precision in ("fp16", "bf16"):
+        if precision in ("fp16", "bf16"): #False
             dtype = torch.float16 if 'fp16' in precision else torch.bfloat16
             # manual mixed precision that matches original OpenAI behaviour
             if is_timm_model:
@@ -211,11 +213,11 @@ def create_model(
         elif precision in ("pure_fp16", "pure_bf16"):
             dtype = torch.float16 if 'fp16' in precision else torch.bfloat16
             model.to(device=device, dtype=dtype)
-        else:
+        else: #True
             model.to(device=device)
 
         pretrained_loaded = False
-        if pretrained:
+        if pretrained: #None
             checkpoint_path = ''
             pretrained_cfg = get_pretrained_cfg(model_name, pretrained)
             if pretrained_cfg:
@@ -233,7 +235,7 @@ def create_model(
                 logging.warning(error_str)
                 raise RuntimeError(error_str)
             pretrained_loaded = True
-        elif has_hf_hub_prefix:
+        elif has_hf_hub_prefix: #False
             logging.info(f'Loading pretrained {model_name} weights ({pretrained}).')
             load_checkpoint(model, checkpoint_path)
             pretrained_loaded = True
@@ -248,9 +250,10 @@ def create_model(
         model.visual.image_std = pretrained_cfg.get('std', None) or OPENAI_DATASET_STD
 
     if output_dict and hasattr(model, "output_dict"):
+        #True
         model.output_dict = True
 
-    if jit:
+    if jit: #False
         model = torch.jit.script(model)
 
     return model
@@ -277,21 +280,22 @@ def create_loss(args):
             world_size=args.world_size,
             use_horovod=args.horovod,
         )
+
     return ClipLoss(
-        local_loss=args.local_loss,
-        gather_with_grad=args.gather_with_grad,
+        local_loss=args.local_loss, #False
+        gather_with_grad=args.gather_with_grad, #False
         cache_labels=True,
         rank=args.rank,
         world_size=args.world_size,
-        use_horovod=args.horovod,
+        use_horovod=args.horovod, # False
     )
 
 
 def create_model_and_transforms(
-        model_name: str,
+        model_name: str, #RN50
         pretrained: Optional[str] = None,
-        precision: str = 'fp32',
-        device: Union[str, torch.device] = 'cpu',
+        precision: str = 'fp32', #amp
+        device: Union[str, torch.device] = 'cpu', #cuda:0
         jit: bool = False,
         force_quick_gelu: bool = False,
         force_custom_text: bool = False,
@@ -301,9 +305,9 @@ def create_model_and_transforms(
         pretrained_hf: bool = True,
         image_mean: Optional[Tuple[float, ...]] = None,
         image_std: Optional[Tuple[float, ...]] = None,
-        aug_cfg: Optional[Union[Dict[str, Any], AugmentationCfg]] = None,
+        aug_cfg: Optional[Union[Dict[str, Any], AugmentationCfg]] = None, #{}
         cache_dir: Optional[str] = None,
-        output_dict: Optional[bool] = None,
+        output_dict: Optional[bool] = None, #True
 ):
     model = create_model(
         model_name,
@@ -323,12 +327,13 @@ def create_model_and_transforms(
 
     image_mean = image_mean or getattr(model.visual, 'image_mean', None)
     image_std = image_std or getattr(model.visual, 'image_std', None)
+
     preprocess_train = image_transform(
-        model.visual.image_size,
+        model.visual.image_size, #224
         is_train=True,
         mean=image_mean,
         std=image_std,
-        aug_cfg=aug_cfg,
+        aug_cfg=aug_cfg, #{}
     )
     preprocess_val = image_transform(
         model.visual.image_size,

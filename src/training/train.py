@@ -60,21 +60,22 @@ def backward(total_loss, scaler):
 
 
 def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist_model, args, tb_writer=None):
-    device = torch.device(args.device)
-    autocast = get_autocast(args.precision)
-    input_dtype = get_input_dtype(args.precision)
-
+    device = torch.device(args.device) #cuda:0
+    autocast = get_autocast(args.precision) #amp.autocast
+    input_dtype = get_input_dtype(args.precision) #None
 
     model.train()
-    if args.distill:
+    if args.distill: #False
         dist_model.eval()
 
+    # 这样设置epoch数对进程更加安全？
     data['train'].set_epoch(epoch)  # set epoch in process safe manner via sampler or shared_epoch
     dataloader = data['train'].dataloader
+
     num_batches_per_epoch = dataloader.num_batches // args.accum_freq
     sample_digits = math.ceil(math.log(dataloader.num_samples + 1, 10))
 
-    if args.accum_freq > 1:
+    if args.accum_freq > 1: # False ==1
         accum_images, accum_texts, accum_features = [], [], {}
 
     losses_m = {}
@@ -99,7 +100,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
             with autocast():
                 model_out = model(images, texts)
                 logit_scale = model_out["logit_scale"]
-                if args.distill:
+                if args.distill: #False
                     with torch.no_grad():
                         dist_model_out = dist_model(images, texts)
                     model_out.update({f'dist_{k}' : v for k, v in dist_model_out.items()})
@@ -149,7 +150,8 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                     losses["loss"] = total_loss
                 backward(total_loss, scaler)
 
-        if scaler is not None:
+
+        if scaler is not None: #True 默认是开amp训练的
             if args.horovod:
                 optimizer.synchronize()
                 scaler.unscale_(optimizer)
@@ -158,7 +160,7 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
                 with optimizer.skip_synchronize():
                     scaler.step(optimizer)
             else:
-                if args.grad_clip_norm is not None:
+                if args.grad_clip_norm is not None: #None
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip_norm, norm_type=2.0)
                 scaler.step(optimizer)
